@@ -12,9 +12,11 @@ const none = { notch: false, plates: [false, false] };
 {
   const w = 20;
   const r = BF.solve(P, w, none);
-  const G = E * b.GoverE;
-  const exact = 5 * w * Math.pow(L, 4) / (384 * E * I) + w * L * L / (8 * (5 / 6) * G * A);
+  const Eb = BF.Ebend(P), G = Eb * b.GoverE;   // shear-free E = 1.05 x tabulated (NDS App. F.3.1)
+  const exact = 5 * w * Math.pow(L, 4) / (384 * Eb * I) + w * L * L / (8 * (5 / 6) * G * A);
   ok('baseline UDL deflection = Timoshenko closed form', close(r.maxSag, exact, 0.002), r.maxSag.toFixed(5) + ' vs ' + exact.toFixed(5));
+  const app = 5 * w * Math.pow(L, 4) / (384 * E * I);
+  ok('apparent-E check: modelled sag ~ 5wL^4/384EI with tabulated E (within 1%)', close(r.maxSag, app, 0.01), r.maxSag.toFixed(5) + ' vs ' + app.toFixed(5));
   const Mmax = r.el.reduce((m, e) => Math.max(m, e.Mtot), 0);
   ok('internal moment equals static M (midspan)', close(Mmax, w * L * L / 8, 0.005), Mmax.toFixed(0) + ' vs ' + (w * L * L / 8).toFixed(0));
   const Q = BF.clone(P); Q.beam.shear = false;

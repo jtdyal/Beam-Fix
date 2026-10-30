@@ -5,7 +5,7 @@ two steel side plates (bolted, lagged or nailed) win back. The web app runs enti
 hosted with GitHub Pages from `/docs`.
 
 * **App:** `docs/index.html` (engine in `docs/engine.js`, UI in `docs/ui.js`)
-* **Tests:** `node tests/engine.test.js` (closed-form beam theory, parallel-axis composite theory, equilibrium)
+* **Tests:** `node tests/engine.test.js` (closed-form beam theory, parallel-axis composite theory, equilibrium) and `node tests/nds_tables.test.js` (41 values from NDS Tables 12D/12I/12K/12P)
 * **3-D reference model:** `reference/` (scikit-fem, quadratic hexes, orthotropic wood) and `node reference/compare.js`
 
 > Exploration tool only. A tension-face notch in a structural glulam is a serious defect and a repair of a load-bearing
@@ -13,9 +13,9 @@ hosted with GitHub Pages from `/docs`.
 
 ## Defaults (your beam)
 * 1.8E glulam, Southern Pine (G = 0.55), 3.5" x 13.5", 235" long, 3.5" bearing on each jack-stud pair, so the clear opening is 228" (19 ft) and the analysis span is 231.5".
-* Load = uniform load that makes the *undamaged* beam sag exactly 5/8" (about 246 lb/ft with shear deflection). That is an upper bound, the real load may be lower.
+* Load = uniform load that makes the *undamaged* beam sag exactly 5/8" (about 258 lb/ft). That is an upper bound, the real load may be lower.
 * Notch 3" x 48" on the bottom, centred 70" from the left end.
-* Plate 1 (outside) 3/16" x 13.5", 228" long, lag screws 1/2", 2 rows at 8". Plate 2 (inside) is off by default.
+* Plate 1 (outside) 3/16" x 13.5", 228" long, lag screws 1/2" (3" penetration), 2 rows at 8". Plate 2 (inside) is off by default.
 * Plate thickness 1/8"-1/2" (1/16" steps); height 6"-13.5" and bottom-edge location in 1/2" steps. Repair goal 1/4" or 5/8" (or custom).
 
 ## Model
@@ -23,11 +23,25 @@ Layered Timoshenko beam FE: the wood and each plate have their own axial DOF and
 are slip springs (K = 270,000 D^1.5 per fastener). Fastener capacity uses the NDS yield-limit equations. See the "Model &
 assumptions" panel in the app.
 
-### About the NDS table numbers
-The request cited NDS tables 8.2B, 9.3B, 12.3E and 12.3F. I could not map those to a published NDS edition, so the app uses the
-underlying equations (yield limit Modes Im-IV, dowel bearing strengths, Rd terms) rather than looked-up table values. Values that
-should be verified against your edition are marked in `docs/engine.js` (lag-screw Fyb = 45 ksi is conservative; nail Fyb by diameter;
-slip modulus; Fes = 87 ksi). Fb and Fv in the UI are placeholders.
+### NDS provisions used (NDS 2015 edition, plus the 2015 Supplement)
+Glulam values: Supplement **Table 5A**, stress class **24F-1.8E** (Fbx+ 2400 psi, Fvx 300 psi for Southern Pine per footnote 3, Ex 1.8E6 psi;
+G = 0.55 for fastener design per footnote 10). The tabulated E is an *apparent* modulus that already includes shear deflection (Appendix F.3.1), so
+with shear modelled explicitly the engine uses shear-free E = 1.05 Ex and G = E/16.
+
+Connections (Chapter 11 and 12):
+* **Table 12.3.1A / 12.3.1B** yield limit equations (single and double shear) and reduction term Rd; **Table 12.3.3** dowel bearing Fe;
+  Fes = 87,000 psi for A36 plate.
+* **Tables 12D, 12I** (bolts, glulam main member, 1/4" A36 plate, single / double shear), **12K** (lag screws, steel side plate, reduced-body diameter
+  Dr from Appendix **Table L2**, penetration factor p/8D, minimum 4D), **12P** (nails, steel side plate, penetration p/10D, minimum 6D).
+  `tests/nds_tables.test.js` checks 41 tabulated values; all agree within 2%.
+* **11.3.6** group action factor Cg (optional in the app; off by default because the FE already captures non-uniform fastener load) and slip modulus
+  270,000 D^1.5; **Table 12.5.1B/D/F** spacing, row spacing and the glulam limit on the distance between outer rows (lag screws 6", bolts 10").
+* **3.4.3.2 / 3.4.3.3 / 5.3.10** shear at the notch (Eq. 3.4-3) and at bolt/lag connections within 5d of the end, with Cvr = 0.72; **5.3.6** volume factor.
+* **5.4.5.1**: the tension side of a glulam bending member may not be notched except at the ends for bearing (depth <= the lesser of d/10 or 3").
+  The damage in this project is outside that rule, so the app always flags it.
+
+Assumptions still to be confirmed: plate steel is A36 (Fe 87 ksi), lag screws are reduced-body, rows of fasteners are staggered/spaced so that screws from
+opposite faces do not meet, and CL = 1.0 (compression edge braced).
 
 ## Develop
 ```

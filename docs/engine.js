@@ -16,7 +16,7 @@
   'use strict';
 
   /* ------------------------------------------------------------------ */
-  /* Fastener catalogue                                                   */
+  /* Fastener catalogue  (NDS 2015: Appendix L tables L2/L4, Table 12K/12P notes) */
   /* ------------------------------------------------------------------ */
   const NAILS = {
     '8d':  { label: '8d common (0.131" x 2-1/2")',  D: 0.131, L: 2.5 },
@@ -28,19 +28,31 @@
     '40d': { label: '40d common (0.225" x 5")',     D: 0.225, L: 5.0 },
     '60d': { label: '60d common (0.244" x 5-1/2")', D: 0.244, L: 5.5 },
   };
+  // Lag screws: nominal D, root diameter Dr (Table L2), tapered-tip length E (Table L2), Fyb (Table 12K note 2),
+  // reduced = true: Table 12K / 12J note 2 tabulates all sizes as "reduced body diameter" lag screws (root diameter used in the yield equations).
   const LAGS = {
-    '1/4': 0.25, '5/16': 0.3125, '3/8': 0.375, '7/16': 0.4375, '1/2': 0.5, '5/8': 0.625, '3/4': 0.75,
+    '1/4':  { D: 0.25,   Dr: 0.173, E: 5 / 32,  Fyb: 70000, reduced: true },
+    '5/16': { D: 0.3125, Dr: 0.227, E: 3 / 16,  Fyb: 60000, reduced: true },
+    '3/8':  { D: 0.375,  Dr: 0.265, E: 7 / 32,  Fyb: 45000, reduced: true },
+    '7/16': { D: 0.4375, Dr: 0.328, E: 9 / 32,  Fyb: 45000, reduced: true },
+    '1/2':  { D: 0.5,    Dr: 0.371, E: 5 / 16,  Fyb: 45000, reduced: true },
+    '5/8':  { D: 0.625,  Dr: 0.471, E: 13 / 32, Fyb: 45000, reduced: true },
+    '3/4':  { D: 0.75,   Dr: 0.579, E: 1 / 2,   Fyb: 45000, reduced: true },
   };
-  const BOLTS = {
-    '1/4': 0.25, '3/8': 0.375, '1/2': 0.5, '5/8': 0.625, '3/4': 0.75, '7/8': 0.875, '1': 1.0,
-  };
+  const BOLTS = { '1/4': 0.25, '3/8': 0.375, '1/2': 0.5, '5/8': 0.625, '3/4': 0.75, '7/8': 0.875, '1': 1.0 };
 
+  // nominal diameter (spacing, slip modulus, group action)
   function fastenerD(f) {
     if (f.type === 'nail') return NAILS[f.nail].D;
-    if (f.type === 'lag') return LAGS[f.size];
+    if (f.type === 'lag') return LAGS[f.size].D;
     return BOLTS[f.size];
   }
-  // Bending yield strength Fyb (psi).  Nails: by diameter band.  Bolts: 45 ksi.  Lag screws: 45 ksi (conservative).
+  // diameter used in the yield limit equations (12.3.7.1: root/reduced-body diameter for reduced-body lag screws)
+  function fastenerDy(f) {
+    if (f.type === 'lag') { const l = LAGS[f.size]; return l.reduced ? l.Dr : l.D; }
+    return fastenerD(f);
+  }
+  // Bending yield strength Fyb (psi): Tables 12B-12K, 12N-12R notes
   function fastenerFyb(f) {
     if (f.type === 'nail') {
       const D = NAILS[f.nail].D;
@@ -49,59 +61,60 @@
       if (D <= 0.236) return 80000;
       return 70000;
     }
+    if (f.type === 'lag') return LAGS[f.size].Fyb;
     return 45000;
   }
 
   /* ------------------------------------------------------------------ */
-  /* NDS yield limit model                                                */
+  /* NDS yield limit model  (NDS 2015 Tables 12.3.1A, 12.3.1B, 12.3.3)    */
   /* ------------------------------------------------------------------ */
-  function Rd(D, mode, theta) {
+  // Reduction term Rd, Table 12.3.1B.  thr = threaded fastener with D>=0.25" nominal but root diameter < 0.25" (note 1)
+  function Rd(D, mode, theta, thr) {
     const Kth = 1 + 0.25 * (theta / 90);
-    if (D < 0.25) {
-      if (D <= 0.17) return 2.2;
-      return 10 * D + 0.5;
-    }
-    if (mode === 'Im') return 4 * Kth;
-    if (mode === 'Is') return 3.6 * Kth;
+    const KD = D <= 0.17 ? 2.2 : (D < 0.25 ? 10 * D + 0.5 : 1);
+    if (thr) return KD * Kth;
+    if (D < 0.25) return KD;
+    if (mode === 'Im' || mode === 'Is') return 4 * Kth;
+    if (mode === 'II') return 3.6 * Kth;
     return 3.2 * Kth;
   }
 
-  // Dowel bearing strength of wood, parallel to grain (theta=0), psi
-  function Fem(f, G) {
-    const D = fastenerD(f);
-    if (D < 0.25) return 16600 * Math.pow(G, 1.84);
-    return 11200 * G;
+  // Dowel bearing strength Fe of the wood (Table 12.3.3 equations: values in the table are these, rounded)
+  function FeWood(f, G, Dn, theta) {
+    if (Dn < 0.25) return 16600 * Math.pow(G, 1.84);
+    const par = 11200 * G, perp = 6100 * Math.pow(G, 1.45) / Math.sqrt(Dn);
+    if (!theta) return par;
+    const t = theta * Math.PI / 180; // Hankinson (12.3-11)
+    return par * perp / (par * Math.pow(Math.sin(t), 2) + perp * Math.pow(Math.cos(t), 2));
   }
-  const FES_STEEL = 87000; // 1.5 * Fu (A36, Fu = 58 ksi)
+  const FES_STEEL = 87000; // ASTM A36 (Tables 12B, 12D, 12I, 12K note 2)
 
-  // Single shear: wood main member (effective length lm) / steel side member (thickness ls)
-  function zSingle(D, lm, ls, fem, fes, fyb, theta) {
-    const Re = fem / fes, Rt = lm / ls;
+  // Table 12.3.1A single shear
+  function zSingle(D, lm, ls, fem, fes, fyb, theta, thr) {
+    const Re = fem / fes, Rt = lm / ls, R = m => Rd(D, m, theta, thr);
     const modes = {};
-    modes.Im = D * lm * fem / Rd(D, 'Im', theta);
-    modes.Is = D * ls * fes / Rd(D, 'Is', theta);
+    modes.Im = D * lm * fem / R('Im');
+    modes.Is = D * ls * fes / R('Is');
     const k1 = (Math.sqrt(Re + 2 * Re * Re * (1 + Rt + Rt * Rt) + Rt * Rt * Re * Re * Re) - Re * (1 + Rt)) / (1 + Re);
-    modes.II = k1 * D * ls * fes / Rd(D, 'II', theta);
+    modes.II = k1 * D * ls * fes / R('II');
     const k2 = -1 + Math.sqrt(2 * (1 + Re) + 2 * fyb * (1 + 2 * Re) * D * D / (3 * fem * lm * lm));
-    modes.IIIm = k2 * D * lm * fem / ((1 + 2 * Re) * Rd(D, 'IIIm', theta));
+    modes.IIIm = k2 * D * lm * fem / ((1 + 2 * Re) * R('IIIm'));
     const k3 = -1 + Math.sqrt(2 * (1 + Re) / Re + 2 * fyb * (2 + Re) * D * D / (3 * fem * ls * ls));
-    modes.IIIs = k3 * D * ls * fem / ((2 + Re) * Rd(D, 'IIIs', theta));
-    modes.IV = D * D / Rd(D, 'IV', theta) * Math.sqrt(2 * fem * fyb / (3 * (1 + Re)));
+    modes.IIIs = k3 * D * ls * fem / ((2 + Re) * R('IIIs'));
+    modes.IV = D * D / R('IV') * Math.sqrt(2 * fem * fyb / (3 * (1 + Re)));
     return modes;
   }
-  // Double shear: wood main member (lm) with two steel side members (ls each)
-  function zDouble(D, lm, ls, fem, fes, fyb, theta) {
-    const Re = fem / fes;
+  // Table 12.3.1A double shear (wood main member lm, two steel side members ls each)
+  function zDouble(D, lm, ls, fem, fes, fyb, theta, thr) {
+    const Re = fem / fes, R = m => Rd(D, m, theta, thr);
     const modes = {};
-    modes.Im = D * lm * fem / Rd(D, 'Im', theta);
-    modes.Is = 2 * D * ls * fes / Rd(D, 'Is', theta);
+    modes.Im = D * lm * fem / R('Im');
+    modes.Is = 2 * D * ls * fes / R('Is');
     const k3 = -1 + Math.sqrt(2 * (1 + Re) / Re + 2 * fyb * (2 + Re) * D * D / (3 * fem * ls * ls));
-    modes.IIIs = 2 * k3 * D * ls * fem / ((2 + Re) * Rd(D, 'IIIs', theta));
-    modes.IV = 2 * D * D / Rd(D, 'IV', theta) * Math.sqrt(2 * fem * fyb / (3 * (1 + Re)));
+    modes.IIIs = 2 * k3 * D * ls * fem / ((2 + Re) * R('IIIs'));
+    modes.IV = 2 * D * D / R('IV') * Math.sqrt(2 * fem * fyb / (3 * (1 + Re)));
     return modes;
   }
-  // NDS: sheet-metal side-plate uses Is = 1.0*..., keep generic.  Note Mode Is in NDS single-shear steel-side
-  // case governs rarely; we keep all modes and take the minimum.
 
   function minMode(modes) {
     let best = Infinity, key = '';
@@ -109,12 +122,12 @@
     return { Z: best, mode: key };
   }
 
-  // Slip modulus per shear plane (lb/in), wood-to-metal
+  // Load/slip modulus, wood-to-metal dowel-type fastener (11.3.6): 270,000 D^1.5, lb/in
   function slipModulus(D) { return 270000 * Math.pow(D, 1.5); }
 
-  // NDS group action factor Cg (steel side plates).  n = fasteners in a row, s = spacing in row.
+  // Group action factor Cg, Eq. 11.3-1 (steel side plates).  n = fasteners in a row, s = spacing in row.
   function groupCg(n, s, D, Em, Am, Es, As) {
-    if (n <= 1) return 1;
+    if (n <= 1 || D < 0.25) return 1;
     const gamma = slipModulus(D);
     const u = 1 + gamma * (s / 2) * (1 / (Em * Am) + 1 / (Es * As));
     const m = u - Math.sqrt(u * u - 1);
@@ -125,44 +138,52 @@
   }
 
   /**
-   * Lateral capacity of one fastener (per connection, single or double shear).
-   * Returns reference Z, controlling mode, adjusted Z' (CD, CM, Ct, penetration reduction; optional Cg).
+   * Lateral capacity of one fastener, steel side plate to glulam main member.
+   * opts: { plateT, double, lm (override main-member dowel length, for table checks), fes (override), pitch }
    */
   function fastenerCapacity(P, opts) {
     opts = opts || {};
-    const f = P.fast, b = P.beam.b;
-    const D = fastenerD(f), fem = Fem(f, f.G), fes = FES_STEEL, fyb = fastenerFyb(f);
-    const ts = opts.plateT;
-    const out = { D, Fem: fem, Fes: fes, Fyb: fyb, K: slipModulus(D) * (f.slipMult || 1), notes: [] };
-    let modes, lm;
+    const f = P.fast, b = P.beam.b, ts = opts.plateT;
+    const Dn = fastenerD(f), Dy = fastenerDy(f), fyb = fastenerFyb(f);
+    const fes = opts.fes || FES_STEEL;
+    const fem = FeWood(f, f.G, Dn, 0), femP = FeWood(f, f.G, Dn, 90);
+    const thr = f.type === 'lag' && Dn >= 0.25 && Dy < 0.25;
+    const out = { D: Dn, Dy, Fem: fem, FemPerp: femP, Fes: fes, Fyb: fyb, K: slipModulus(Dn) * (f.slipMult || 1), notes: [], thr };
     const dbl = !!opts.double && f.type === 'bolt';
+    let lm, pf = 1;
     if (f.type === 'bolt') {
       lm = b;
-      modes = dbl ? zDouble(D, lm, ts, fem, fes, fyb, 0) : zSingle(D, lm, ts, fem, fes, fyb, 0);
+    } else if (f.type === 'lag') {
+      const L = LAGS[f.size];
+      const ptot = Math.min(f.pen, b - 0.25);                 // penetration into the beam, including the tip
+      const pex = ptot - L.E;                                  // excluding the tapered tip
+      lm = ptot - L.E / 2;                                     // dowel bearing length, 12.3.5.3
+      if (pex < 4 * Dn - 1e-9) { pf = 0; out.notes.push('Lag screw penetration (not counting the tip) is ' + pex.toFixed(2) + '", less than the 4D = ' + (4 * Dn).toFixed(2) + '" minimum (12.1.4.6): not permitted.'); }
+      else pf = Math.min(1, pex / (8 * Dn));                   // Table 12K note 3
+      out.pen = { total: ptot, excl: pex, need8D: 8 * Dn };
     } else {
-      let p = f.pen;
-      if (f.type === 'nail') p = Math.min(p, NAILS[f.nail].L - ts);
-      if (opts.twoPlates) p = Math.min(p, b / 2);
-      lm = p;
-      modes = zSingle(D, lm, ts, fem, fes, fyb, 0);
-      if (f.type === 'lag') {
-        if (p < 4 * D) out.notes.push('Lag screw penetration is less than 4D (' + (4 * D).toFixed(2) + '"): not permitted by NDS.');
-      }
+      const E = 2 * Dn;
+      const ptot = Math.min(f.pen, NAILS[f.nail].L - ts, b);
+      lm = ptot - E / 2;
+      if (ptot < 6 * Dn - 1e-9) { pf = 0; out.notes.push('Nail penetration ' + ptot.toFixed(2) + '" is less than 6D = ' + (6 * Dn).toFixed(2) + '": not permitted (Table 12P note 3).'); }
+      else pf = Math.min(1, ptot / (10 * Dn));                 // Table 12P note 3
+      out.pen = { total: ptot, excl: ptot, need8D: 10 * Dn };
     }
-    const mm = minMode(modes);
-    out.modes = modes; out.mode = mm.mode; out.Zref = mm.Z; out.double = dbl; out.lm = lm;
-    // perpendicular-to-grain capacity (for the vertical load-transfer component)
-    const femP = D < 0.25 ? fem : 6100 * Math.pow(f.G, 1.45) / Math.sqrt(D);
-    const modesP = dbl ? zDouble(D, lm, ts, femP, fes, fyb, 90) : zSingle(D, lm, ts, femP, fes, fyb, 90);
-    out.FemPerp = femP; out.ZrefPerp = minMode(modesP).Z;
-    let pf = 1;
-    if (f.type === 'lag' && lm < 8 * D) pf = Math.max(0, lm / (8 * D));
-    out.penFactor = pf;
-    const adj = (f.CD || 1) * (f.CM || 1) * (f.Ct || 1) * pf;
-    out.Zadj = mm.Z * adj;
-    out.ZadjPerp = out.ZrefPerp * adj;
-    out.Zadj_noCg = out.Zadj;
-    out.adj = adj;
+    if (opts.lm) lm = opts.lm;
+    const modes = dbl ? zDouble(Dy, lm, ts, fem, fes, fyb, 0, thr) : zSingle(Dy, lm, ts, fem, fes, fyb, 0, thr);
+    const modesP = dbl ? zDouble(Dy, lm, ts, femP, fes, fyb, 90, thr) : zSingle(Dy, lm, ts, femP, fes, fyb, 90, thr);
+    const mm = minMode(modes), mp = minMode(modesP);
+    out.modes = modes; out.mode = mm.mode; out.Zref = mm.Z; out.ZrefPerp = mp.Z; out.double = dbl; out.lm = lm;
+    // geometry factor for spacing in a row (Table 12.5.1B): full value at 4D, linear down to 3D
+    let cd = 1;
+    const pitch = opts.pitch !== undefined ? opts.pitch : f.pitch;
+    if (Dn >= 0.25 && pitch !== undefined) {
+      if (pitch < 3 * Dn - 1e-9) { cd = 0; out.notes.push('Spacing in a row is less than the 3D minimum (Table 12.5.1B): not permitted.'); }
+      else cd = Math.min(1, pitch / (4 * Dn));
+    }
+    out.penFactor = pf; out.Cdelta = cd;
+    const adj = (f.CD || 1) * (f.CM || 1) * (f.Ct || 1) * pf * cd;
+    out.adj = adj; out.Zadj = mm.Z * adj; out.ZadjPerp = mp.Z * adj; out.Zadj_noCg = out.Zadj;
     return out;
   }
 
@@ -171,7 +192,7 @@
   /* ------------------------------------------------------------------ */
   function defaults() {
     return {
-      beam: { b: 3.5, d: 13.5, Ltot: 235, bearing: 3.5, E: 1.8e6, GoverE: 1 / 16, shear: true, Fb: 2400, Fv: 300, CD: 1.0 },
+      beam: { b: 3.5, d: 13.5, Ltot: 235, bearing: 3.5, E: 1.8e6, shearFree: 1.05, GoverE: 1 / 16, shear: true, Fb: 2400, Fv: 300, CD: 1.0 },
       load: { mode: 'limit', limit: 0.625, w_plf: 250 },
       target: 0.25,
       notch: { enabled: true, length: 48, depth: 3, center: 70, ext: 1.5 },
@@ -180,11 +201,14 @@
         { on: true, t: 0.1875, h: 13.5, yb: 0, len: 228, offset: 0 },
         { on: false, t: 0.1875, h: 13.5, yb: 0, len: 228, offset: 0 },
       ],
-      fast: { peak: 1.5, type: 'lag', size: '1/2', nail: '16d', rows: 2, pitch: 8, edge: 4, pen: 2.5, G: 0.55,
+      fast: { peak: 1.5, type: 'lag', size: '1/2', nail: '16d', rows: 2, pitch: 8, edge: 4, pen: 3.0, G: 0.55,
               CD: 1.0, CM: 1.0, Ct: 1.0, useCg: false, slipMult: 1.0 },
     };
   }
   function clone(o) { return JSON.parse(JSON.stringify(o)); }
+  // Tabulated glulam E is an apparent value that already includes shear deflection (NDS App. F.3.1); shear-free
+  // E = 1.05 x tabulated for glulam.  When shear is modelled explicitly the shear-free E is used with G = E/16.
+  function Ebend(P) { return P.beam.E * (P.beam.shear ? (P.beam.shearFree === undefined ? 1.05 : P.beam.shearFree) : 1); }
 
   /* ------------------------------------------------------------------ */
   /* Geometry helpers                                                     */
@@ -208,6 +232,8 @@
     hi = Math.min(hi, P.beam.d - ey);
     const n = Math.max(1, Math.round(P.fast.rows));
     if (hi < lo) return [];
+    const cap = P.fast.type === 'lag' ? 6 : (P.fast.type === 'bolt' ? 10 : Infinity); // Table 12.5.1F (glulam, <16% MC)
+    if (hi - lo > cap) { const mid = (lo + hi) / 2; lo = mid - cap / 2; hi = mid + cap / 2; }
     if (n === 1) return [(lo + hi) / 2];
     const ys = [];
     for (let i = 0; i < n; i++) ys.push(lo + (hi - lo) * i / (n - 1));
@@ -269,7 +295,7 @@
     cfg = cfg || {};
     const useNotch = cfg.notch !== undefined ? cfg.notch : P.notch.enabled;
     const bm = P.beam, nt = P.notch;
-    const E = bm.E, G = bm.E * bm.GoverE, kappa = 5 / 6;
+    const E = Ebend(P), G = E * bm.GoverE, kappa = 5 / 6;
     const Es = P.steel.E;
     const ym = bm.d / 2;
     const xs1 = bm.bearing / 2, xs2 = bm.Ltot - bm.bearing / 2;
@@ -287,8 +313,12 @@
       const xsF = fastenerXs(P, pl);
       const ys = rowsY(P, pl);
       const K = slipModulus(fastenerD(P.fast)) * (P.fast.slipMult || 1);
+      const kx0 = xsF.length ? xsF[0] - P.fast.pitch / 2 : 0, kx1 = xsF.length ? xsF[xsF.length - 1] + P.fast.pitch / 2 : 0;
+      const fastened = xsF.length && ys.length;
       plates.push({
-        idx: i, t: pl.t, h: g.h, yb: g.yb, x0: r.x0, x1: r.x1, xsF, ys, K,
+        // x0/x1: structurally active extent (only where fasteners tie the plate to the beam); px0/px1: physical plate
+        idx: i, t: pl.t, h: g.h, yb: g.yb, px0: r.x0, px1: r.x1,
+        x0: fastened ? Math.max(r.x0, kx0) : r.x0, x1: fastened ? Math.min(r.x1, kx1) : r.x1, xsF, ys, K,
         yc: g.yb + g.h / 2,
         kx0: xsF.length ? xsF[0] - P.fast.pitch / 2 : 0,
         kx1: xsF.length ? xsF[xsF.length - 1] + P.fast.pitch / 2 : 0,
@@ -532,44 +562,72 @@
       return { tens, comp, tensX };
     };
     const sB = stress(baseline), sD = stress(damaged), sR = stress(repaired);
-    const Vat = x => { const R = repaired.R; return R - w * (x - repaired.xs1); };
-    const xd = repaired.xs1 + P.beam.bearing / 2 + P.beam.d; // d from face of support
-    const Vcrit = Math.abs(Vat(xd));
-    const vEnd = 1.5 * Vcrit / (P.beam.b * P.beam.d);
-    let vNotch = 0;
+    // ---- wood checks (NDS 2015 3.4.3, 5.3.6, 5.3.10, 5.4.5)
+    const bm = P.beam, CDw = bm.CD || 1, Cvr = 0.72;
+    const Vat = x => repaired.R - w * (x - repaired.xs1);
+    const xface = repaired.xs1 + bm.bearing / 2;               // face of the support
+    const Fv = bm.Fv * CDw;                                    // Fv' without Cvr
+    const FvR = bm.Fv * CDw * Cvr;                             // Fv' x Cvr (notches, connections: 5.3.10)
+    const Vd = Math.abs(Vat(xface + bm.d));                     // 3.4.3.1: V at d from the support face
+    const vEnd = 1.5 * Vd / (bm.b * bm.d);
+    // volume factor CV, Southern Pine x = 20 (5.3.6); CL = 1.0 assumed (compression edge braced)
+    const Lft = (bm.Ltot - bm.bearing) / 12;
+    const Cv = Math.min(1, Math.pow(21 / Lft, 1 / 20) * Math.pow(12 / bm.d, 1 / 20) * Math.pow(5.125 / bm.b, 1 / 20));
+    const FbAdj = bm.Fb * CDw * Cv;
+    let shearNotch = null, shearConn = null;
     if (P.notch.enabled) {
-      const en = (P.notch.ext === undefined ? 1.5 : P.notch.ext) * P.notch.depth;
-      const nx0 = P.notch.center - P.notch.length / 2 - en, nx1 = P.notch.center + P.notch.length / 2 + en;
-      const Vn = Math.max(Math.abs(Vat(nx0)), Math.abs(Vat(nx1)));
-      vNotch = 1.5 * Vn / (P.beam.b * (P.beam.d - P.notch.depth));
+      const nx0 = P.notch.center - P.notch.length / 2, nx1 = P.notch.center + P.notch.length / 2;
+      const dn = bm.d - P.notch.depth;
+      const V = Math.max(Math.abs(Vat(nx0)), Math.abs(Vat(nx1)));
+      const Vr = (2 / 3) * FvR * bm.b * dn * Math.pow(dn / bm.d, 2);   // Eq. 3.4-3 (tension-face notch)
+      shearNotch = { V, Vr, dn };
+    }
+    if (P.fast.type !== 'nail' && active.length) {
+      // 3.4.3.3: bolts / lag screws in a bending member: de = depth less distance from the unloaded edge to the fastener centre
+      let xmin = Infinity, ylow = Infinity, yhigh = -Infinity;
+      active.forEach(p => { if (p.xsF.length && p.ys.length) { xmin = Math.min(xmin, p.xsF[0]); ylow = Math.min(ylow, p.ys[0]); yhigh = Math.max(yhigh, p.ys[p.ys.length - 1]); } });
+      if (isFinite(xmin)) {
+        const de = Math.min(bm.d - ylow, yhigh);             // conservative: try each edge as the "unloaded" edge
+        const within5d = xmin < 5 * bm.d;
+        const Vr = within5d ? (2 / 3) * FvR * bm.b * de * Math.pow(de / bm.d, 2) : (2 / 3) * FvR * bm.b * de;
+        shearConn = { V: Math.abs(Vat(xface)), Vr, de, within5d, xmin };
+      }
     }
 
     // warnings
     const D = fastenerD(P.fast);
+    if (shearConn && shearConn.V > shearConn.Vr) warn.push('NDS 3.4.3.3: bolts/lag screws within 5d (' + (5 * bm.d).toFixed(1) + '") of the beam end cut the allowable shear to ' + shearConn.Vr.toFixed(0) + ' lb against ' + shearConn.V.toFixed(0) + ' lb at the support face. Start the fasteners at least 5d from the end (raise "Plate end to first fastener"), or have the end shear checked by an engineer.');
+    if (P.notch.enabled) {
+      warn.push('NDS 5.4.5.1: the tension side of a glued laminated bending member shall not be notched except at member ends for bearing, and then only to the lesser of 1/10 of the depth or 3". This notch is outside what the code permits, so the repair is a deviation that needs engineering judgement.');
+      if (P.notch.depth > 3 || P.notch.depth > bm.d / 10) warn.push('Notch depth ' + P.notch.depth + '" exceeds the NDS 5.4.5.1 limit even for end notches (lesser of d/10 = ' + (bm.d / 10).toFixed(2) + '" or 3").');
+      warn.push('Stress concentration at the notch corners and crack growth are not captured by the beam model (NDS 3.2.3.1: a square-cornered notch concentrates stress).');
+    }
     if (P.fast.type !== 'nail') {
-      if (P.fast.pitch < 4 * D) warn.push('Fastener spacing in a row (' + P.fast.pitch + '") is less than 4D = ' + (4 * D).toFixed(2) + '".');
-      if (P.fast.rows > 1) {
-        const ysP = active.length ? active[0].ys : [];
-        if (ysP.length > 1 && ysP[1] - ysP[0] < 1.5 * D) warn.push('Row spacing is less than 1.5D = ' + (1.5 * D).toFixed(2) + '".');
+      if (P.fast.pitch < 4 * D) warn.push('Spacing in a row (' + P.fast.pitch + '") is under 4D = ' + (4 * D).toFixed(2) + '": geometry factor CΔ = pitch/4D applies (Table 12.5.1B); under 3D is not permitted.');
+      const ysP = active.length ? active[0].ys : [];
+      if (ysP.length > 1) {
+        if (ysP[1] - ysP[0] < 1.5 * D) warn.push('Row spacing is less than 1.5D = ' + (1.5 * D).toFixed(2) + '" (Table 12.5.1D).');
       }
+      const capSpread = P.fast.type === 'lag' ? 6 : 10;
+      warn.push('Table 12.5.1F limits the perpendicular-to-grain distance between the outermost ' + (P.fast.type === 'lag' ? 'lag screws' : 'bolts') + ' in glulam to ' + capSpread + '" (rows are kept within it).');
+      warn.push('Bolt/lag hole clearance (initial slip before bearing) is not modelled; real stiffness gain will be lower if holes are oversized (NDS 12.1.3.2: 1/32" to 1/16").');
     } else {
-      warn.push('Nails through steel plate need pre-drilled/ pre-punched plate holes; verify nail spacing per NDS 12.5 for your layout.');
+      warn.push('Nails through steel plate need pre-punched/pre-drilled holes; nail spacing, end and edge distances for D < 1/4" must prevent splitting (NDS 12.1.1, 12.5.1.1). Reference Z for nails assumes ASTM A653 Grade 33 plate up to 1/4" gauge-type thicknesses; this tool uses A36 bearing (87,000 psi).');
     }
     if (P.fast.type === 'nail' && active.some(p => p.t > 0.25)) warn.push('Nailing through plate thicker than 1/4" is generally impractical.');
     active.forEach(p => { if (!p.ys.length) warn.push('Plate ' + (p.idx + 1) + ': no room for fastener rows between the plate edges, notch top and beam edges.'); });
-    if (P.fast.type !== 'bolt' && nPl === 2 && P.fast.pen > P.beam.b / 2) warn.push('Two plates: lag/nail penetration limited to half the beam width (' + (P.beam.b / 2) + '") in the capacity calc.');
-    if (P.notch.enabled) warn.push('Tension-face notch: stress concentration at the notch corners and crack-like behaviour are NOT modelled by the beam FE; glulam tension-face notches are generally prohibited by code. Have a licensed engineer review.');
-    if (P.fast.type !== 'nail') warn.push('Bolt/lag hole clearance (initial slip before bearing) is not modelled; real stiffness gain will be lower if holes are oversized.');
+    if (P.fast.type !== 'bolt' && nPl === 2) warn.push('Two plates with lag screws/nails: stagger the fasteners from the two faces so screws from opposite sides do not meet inside the 3.5" beam.');
+    checks.fasteners.forEach(f => f.cap.notes.forEach(n => { if (warn.indexOf(n) < 0) warn.push(n); }));
 
     return {
       P, w, wPlf: w * 12, dUnit, baseline, damaged, repaired, sweep, checks, warn,
-      wood: { base: sB, dam: sD, rep: sR, vEnd, vNotch },
+      wood: { base: sB, dam: sD, rep: sR, vEnd, Fv, FvR, Cv, FbAdj, shearNotch, shearConn },
     };
   }
 
   return {
     defaults, clone, solve, analyze, NAILS, LAGS, BOLTS,
     fastenerD, fastenerFyb, fastenerCapacity, slipModulus, groupCg, zSingle, zDouble, minMode,
-    plateRange, plateClampedGeom, rowsY, fastenerXs, FES_STEEL, Fem,
+    plateRange, plateClampedGeom, rowsY, fastenerXs, FES_STEEL, FeWood, fastenerDy, Ebend,
   };
 });

@@ -10,7 +10,7 @@ const refBy = Array.isArray(ref) ? Object.fromEntries(ref.map(r => [r.name, r]))
 function toParams(c) {
   const P = BF.defaults();
   P.beam.b = c.beam.b; P.beam.d = c.beam.d; P.beam.Ltot = c.beam.Ltot; P.beam.bearing = c.beam.bearing;
-  P.beam.E = c.beam.E; P.beam.GoverE = c.beam.G_over_E; P.beam.shear = true;
+  P.beam.E = c.beam.E; P.beam.shearFree = 1; P.beam.GoverE = c.beam.G_over_E; P.beam.shear = true;
   P.notch = Object.assign({}, c.notch);
   P.plates.forEach(p => p.on = false);
   c.plates.forEach((p, i) => {

@@ -71,9 +71,9 @@
         ${numRow('beam.d', 'Depth', 6, 30, 0.125, 'in')}
         ${numRow('beam.Ltot', 'Total length', 60, 600, 1, 'in')}
         ${numRow('beam.bearing', 'Bearing length each end', 1, 12, 0.25, 'in')}
-        ${numRow('beam.E', 'E (1.8E = 1,800,000)', 500000, 3000000, 50000, 'psi')}
+        ${numRow('beam.E', 'Ex tabulated (24F-1.8E)', 500000, 3000000, 50000, 'psi')}
         <div class="hint">Clear opening = ${clear}" (${(clear / 12).toFixed(2)} ft); span used (clear + one bearing = centre-to-centre of bearings) = ${clear + P.beam.bearing}".</div>
-        ${chkRow('beam.shear', 'Include shear deflection (G = E/16)')}
+        ${chkRow('beam.shear', 'Model shear explicitly: shear-free E = 1.05 x tabulated, G = E/16 (NDS App. F)')}
       </fieldset>
       <fieldset><legend>Load</legend>
         ${selRow('load.mode', 'Load basis', [['limit', 'Back-calculate from original limit'], ['manual', 'Enter uniform load']])}
@@ -90,9 +90,9 @@
         ${f.type === 'nail' ? selRow('fast.nail', 'Nail', Object.keys(BF.NAILS).map(k => [k, BF.NAILS[k].label])) : selRow('fast.size', 'Diameter', sizeOpts.map(k => [k, k + '"']))}
         ${numRow('fast.rows', 'Rows', 1, 6, 1, '')}
         ${numRow('fast.pitch', 'Spacing in row', 1, 36, 0.5, 'in')}
-        ${numRow('fast.edge', 'Plate end to first fastener', 1, 24, 0.5, 'in')}
-        ${f.type !== 'bolt' ? numRow('fast.pen', 'Penetration into beam', 0.5, 8, 0.25, 'in') : ''}
-        ${numRow('fast.G', 'Wood specific gravity G', 0.3, 0.8, 0.01, '')}
+        ${numRow('fast.edge', 'Plate end to first fastener', 1, 100, 0.5, 'in')}
+        ${f.type !== 'bolt' ? numRow('fast.pen', f.type === 'lag' ? 'Lag penetration into beam (incl. tip)' : 'Nail penetration into beam', 0.5, 8, 0.25, 'in') : ''}
+        ${numRow('fast.G', 'Specific gravity G (SP glulam 0.55)', 0.3, 0.8, 0.01, '')}
         ${numRow('fast.CD', 'Load duration factor CD', 0.9, 2, 0.05, '')}
         ${chkRow('fast.useCg', 'Also apply NDS group-action factor Cg')}
         <div class="hint">Rows are spaced evenly in the plate, above the notch.</div>
@@ -100,9 +100,9 @@
       <fieldset><legend>Goal &amp; wood allowables</legend>
         ${selRow('target', 'Repair sag goal', tgt.map(o => [o[0], o[1]]), 'num')}
         ${numRow('target', 'or custom goal', 0.05, 2, 0.0625, 'in')}
-        ${numRow('beam.Fb', 'Fb (tension zone, assumed)', 500, 4000, 50, 'psi')}
-        ${numRow('beam.Fv', 'Fv (shear, assumed)', 100, 500, 10, 'psi')}
-        <div class="hint">Fb and Fv are placeholders; enter the values for your beam's stamp / NDS Supplement table.</div>
+        ${numRow('beam.Fb', 'Fbx+ (bottom in tension)', 500, 4000, 50, 'psi')}
+        ${numRow('beam.Fv', 'Fvx (shear)', 100, 500, 10, 'psi')}
+        <div class="hint">Defaults are NDS 2015 Supplement Table 5A stress class 24F-1.8E: Fbx+ 2400 psi (bottom in tension; Fbx- = 1450 psi if the beam is upside down), Fvx 300 psi for Southern Pine (fn. 3), Ex 1.8E6 psi. Check your beam's grade stamp.</div>
       </fieldset>`;
     bindInputs();
   }
@@ -157,9 +157,9 @@
     }
     A.repaired.plates.forEach((p, i) => {
       const inside = p.idx === 1;
-      s += `<rect x="${X(p.x0)}" y="${Y(p.yb + p.h)}" width="${(p.x1 - p.x0) * sx}" height="${p.h * sy}" fill="${inside ? 'none' : 'var(--steel)'}" fill-opacity="0.45" stroke="#44546a" stroke-width="1.4" ${inside ? 'stroke-dasharray="6 3"' : ''}/>`;
+      s += `<rect x="${X(p.px0)}" y="${Y(p.yb + p.h)}" width="${(p.px1 - p.px0) * sx}" height="${p.h * sy}" fill="${inside ? 'none' : 'var(--steel)'}" fill-opacity="0.45" stroke="#44546a" stroke-width="1.4" ${inside ? 'stroke-dasharray="6 3"' : ''}/>`;
       p.xsF.forEach(x => p.ys.forEach(y => { s += `<circle cx="${X(x)}" cy="${Y(y)}" r="1.6" fill="#1d2430"/>`; }));
-      s += `<text x="${X(p.x0) + 2}" y="${Y(p.yb + p.h) - 3}">${inside ? 'inside' : 'outside'} plate ${fr16(p.t)} x ${p.h}" x ${(p.x1 - p.x0).toFixed(0)}"  (bottom at ${p.yb}")</text>`;
+      s += `<text x="${X(p.px0) + 2}" y="${Y(p.yb + p.h) - 3}">${inside ? 'inside' : 'outside'} plate ${fr16(p.t)} x ${p.h}" x ${(p.px1 - p.px0).toFixed(0)}"  (bottom at ${p.yb}")</text>`;
     });
     // supports
     [xs1, xs2].forEach(x => {
@@ -199,10 +199,12 @@
     row('Rows x fasteners per row', f => `${f.rows} x ${f.n}`);
     row('Dowel bearing Fem (wood, || grain)', f => f.cap.Fem.toFixed(0) + ' psi');
     row('Bending yield Fyb', f => f.cap.Fyb.toFixed(0) + ' psi');
+    row('Diameter in yield equations', f => f.cap.Dy.toFixed(3) + '"' + (f.cap.Dy !== f.cap.D ? ' (root dia., 12.3.7)' : ''));
+    if (c.fasteners.some(f => f.cap.pen)) row('Penetration (excl. tip) / needed for full Z', f => f.cap.pen ? f.cap.pen.excl.toFixed(2) + '" / ' + f.cap.pen.need8D.toFixed(2) + '"' : '-');
     ['Im', 'Is', 'II', 'IIIm', 'IIIs', 'IV'].forEach(m => { if (f0has(m)) row('Mode ' + m + ' (lb)', f => f.cap.modes[m] !== undefined ? f.cap.modes[m].toFixed(0) : '-', d => d.cap.modes[m] !== undefined ? d.cap.modes[m].toFixed(0) : '-'); });
     function f0has(m) { return c.fasteners.some(f => f.cap.modes[m] !== undefined) || (c.doubleShear && c.doubleShear.cap.modes[m] !== undefined); }
     row('Reference Z (controlling mode)', f => f.cap.Zref.toFixed(0) + ' lb (' + f.cap.mode + ')', d => d.cap.Zref.toFixed(0) + ' lb (' + d.cap.mode + ')');
-    row('Adjustment (CD x CM x Ct x penetration)', f => f.cap.adj.toFixed(2) + (f.cap.Cg ? ' x Cg ' + f.cap.Cg.toFixed(2) : ''), d => d.cap.adj.toFixed(2));
+    row('Adjustment: CD x CM x Ct x penetration x C\u0394', f => f.cap.adj.toFixed(2) + ' (pen ' + f.cap.penFactor.toFixed(2) + ', C\u0394 ' + f.cap.Cdelta.toFixed(2) + ')' + (f.cap.Cg ? ' x Cg ' + f.cap.Cg.toFixed(2) : ''), d => d.cap.adj.toFixed(2));
     row("Adjusted Z' along grain", f => f.cap.Zadj.toFixed(0) + ' lb', d => d.cap.Zadj.toFixed(0) + ' lb');
     row('Peak fastener force (FE peak x ' + (P.fast.peak || 1) + ' local allowance)', f => f.demand.toFixed(0) + ' lb', d => d.demand.toFixed(0) + ' lb');
     row('Utilisation (shear flow)', f => pill(f.demand / f.cap.Zadj <= 1, (100 * f.demand / f.cap.Zadj).toFixed(0) + '%', (100 * f.demand / f.cap.Zadj).toFixed(0) + '%'), d => pill(d.demand / d.cap.Zadj <= 1, (100 * d.demand / d.cap.Zadj).toFixed(0) + '%', (100 * d.demand / d.cap.Zadj).toFixed(0) + '%'));
@@ -241,14 +243,17 @@
   }
 
   function renderWood(A) {
-    const w = A.wood, Fb = P.beam.Fb * P.beam.CD, Fv = P.beam.Fv * P.beam.CD;
-    const r = (lbl, s) => `<tr><td>${lbl}</td><td>${s.tens.toFixed(0)} psi</td><td>${pill(s.tens <= Fb, (100 * s.tens / Fb).toFixed(0) + '% of Fb', (100 * s.tens / Fb).toFixed(0) + '% of Fb')}</td><td>${s.comp.toFixed(0)} psi</td><td>@ ${s.tensX.toFixed(0)}"</td></tr>`;
-    $('wood').innerHTML = `<table><tr><th>Case</th><th>Peak tension (bending + axial)</th><th>vs Fb x CD = ${Fb.toFixed(0)}</th><th>Peak compression</th><th>Where</th></tr>
+    const w = A.wood, Fb = w.FbAdj;
+    const r = (lbl, s) => `<tr><td>${lbl}</td><td>${s.tens.toFixed(0)} psi</td><td>${pill(s.tens <= Fb, (100 * s.tens / Fb).toFixed(0) + '% of Fb′', (100 * s.tens / Fb).toFixed(0) + '% of Fb′')}</td><td>${s.comp.toFixed(0)} psi</td><td>@ ${s.tensX.toFixed(0)}"</td></tr>`;
+    const u = (V, Vr) => `<td>${V.toFixed(0)} lb</td><td>${Vr.toFixed(0)} lb</td><td>${pill(V <= Vr, (100 * V / Vr).toFixed(0) + '%', (100 * V / Vr).toFixed(0) + '%')}</td>`;
+    let h = `<table><tr><th>Bending</th><th>Peak tension (bending + axial)</th><th>vs Fb′ = Fbx+ x CD x CV = ${Fb.toFixed(0)}</th><th>Peak compression</th><th>Where</th></tr>
       ${r('Undamaged', w.base)}${r('Notched', w.dam)}${r('Notched + plate(s)', w.rep)}</table>
-      <table style="margin-top:8px"><tr><th>Shear (1.5V/A)</th><th>Value</th><th>vs Fv x CD = ${Fv.toFixed(0)}</th></tr>
-      <tr><td>At d from support face (full section)</td><td>${w.vEnd.toFixed(0)} psi</td><td>${pill(w.vEnd <= Fv, (100 * w.vEnd / Fv).toFixed(0) + '%', (100 * w.vEnd / Fv).toFixed(0) + '%')}</td></tr>
-      ${P.notch.enabled ? `<tr><td>At notch ends (reduced section, ignores plate)</td><td>${w.vNotch.toFixed(0)} psi</td><td>${pill(w.vNotch <= Fv, (100 * w.vNotch / Fv).toFixed(0) + '%', (100 * w.vNotch / Fv).toFixed(0) + '%')}</td></tr>` : ''}</table>
-      <p class="hint">Stresses come from the 1-D layered model: no stress concentration at notch corners, no volume/size factors, no bearing-stress check at the jack studs.</p>`;
+      <table style="margin-top:8px"><tr><th>Shear (NDS 3.4.3)</th><th>Actual V</th><th>Allowable V′</th><th>Ratio</th></tr>
+      <tr><td>At d from support face, full section (3.4.3.1; Fv′ = ${w.Fv.toFixed(0)} psi)</td>${u(w.vEnd * (2 / 3) * P.beam.b * P.beam.d, w.Fv * (2 / 3) * P.beam.b * P.beam.d)}</tr>`;
+    if (w.shearNotch) h += `<tr><td>At the notch, tension face (Eq. 3.4-3, Fv′ x Cvr 0.72 = ${w.FvR.toFixed(0)} psi, dn = ${w.shearNotch.dn}")</td>${u(w.shearNotch.V, w.shearNotch.Vr)}</tr>`;
+    if (w.shearConn) h += `<tr><td>At the bolt/lag connection (3.4.3.3, de = ${w.shearConn.de.toFixed(1)}", ${w.shearConn.within5d ? 'within 5d of the end' : 'beyond 5d'}, Cvr 0.72)</td>${u(w.shearConn.V, w.shearConn.Vr)}</tr>`;
+    h += `</table><p class="hint">Stresses come from the 1-D layered model: no stress concentration at notch corners, CL = 1.0 assumed (compression edge braced), bearing at the jack studs not checked. CV = ${w.Cv.toFixed(3)} (Southern Pine, x = 20). Shear checks ignore the plates' contribution.</p>`;
+    $('wood').innerHTML = h;
   }
 
   function renderNotes(A) {
@@ -257,8 +262,8 @@
       <li><b>Geometry</b>: ${P.beam.b}" x ${P.beam.d}" x ${P.beam.Ltot}" beam bearing ${P.beam.bearing}" on each jack-stud pair; clear opening ${clear}"; span for analysis ${clear + P.beam.bearing}" (clear + one bearing length).</li>
       <li><b>Load</b>: uniform line load between the bearing centres. ${P.load.mode === 'limit' ? `Back-calculated so the undamaged beam sags exactly ${fr16(P.load.limit)} (= ${A.wPlf.toFixed(1)} lb/ft). Real load is probably lower, since the limit is a ceiling, not a measurement.` : 'Entered manually.'}</li>
       <li><b>Model</b>: Timoshenko beam elements (&le;1" long). Wood and each plate have their own axial displacement; all share deflection and section rotation. Fasteners are linear slip springs between wood and plate (smeared along the fastener zone). The notch reduces the wood section and shifts its centroid.</li>
-      <li><b>Fasteners</b>: NDS yield-limit equations (Modes Im, Is, II, IIIm, IIIs, IV; single/double shear), dowel bearing strength Fe (11,200 G for D &ge; 1/4", 16,600 G<sup>1.84</sup> for nails), steel Fes = 87,000 psi, Rd reduction terms, slip modulus &gamma; = 270,000 D<sup>1.5</sup>.
-        The specific NDS table numbers in the request (8.2B / 9.3B / 12.3E / 12.3F) could not be matched to a published edition, so these were implemented from the underlying equations; please verify against your edition.</li>
+      <li><b>NDS edition</b>: your NDS 2015 copy. Fastener capacities follow Table 12.3.1A (yield limit equations), 12.3.1B (Rd), 12.3.3 / 12.3.3A (dowel bearing; G = 0.55 for Southern Pine glulam per Supplement Table 5A fn. 10), 11.3.6 (group action Cg and 270,000 D<sup>1.5</sup> slip modulus), 12.5.1B/D/F (spacing, rows, glulam row spread). The engine reproduces the tabulated Z values of Tables 12D and 12I (bolts, glulam, 1/4" steel plate, single and double shear), 12K (lag screws, reduced-body diameter, p = 8D) and 12P (nails) to within 2% (see <code>tests/nds_tables.test.js</code>). Lag screw Fyb 70/60/45 ksi by size, nails 100/90/80/70 ksi by diameter, bolts 45 ksi, steel Fe = 87,000 psi (A36).</li>
+      <li><b>Glulam values</b>: Supplement Table 5A, stress class 24F-1.8E. The tabulated Ex is an apparent modulus that already includes shear deflection; with shear modelled explicitly the engine uses the shear-free E = 1.05 Ex and G = E/16 (App. F.3.1), so the undamaged sag matches 5wL<sup>4</sup>/384EI to about 0.2%.</li>
       <li><b>Not modelled</b>: stress concentration at the notch corners, crack growth, bolt-hole oversize slip, creep, lateral-torsional buckling, bearing at supports, plate local buckling, fire.</li>
       <li><b>Calibration vs the 3-D model</b>: the 1-D beam alone under-predicts the extra sag from a notch (about 5%), so the notch is treated as ${P.notch.ext === undefined ? 1.5 : P.notch.ext} x its depth longer at each end (end-effect allowance); fastener peaks from smeared springs run 20-30% below the 3-D discrete-spring peaks, so peak fastener force carries a 1.5x allowance. Both are adjustable/disclosed and were fitted to the default geometry only.</li>
       <li><b>Validation</b>: automated tests check closed-form beam and parallel-axis composite theory; a separate 3-D finite-element model (quadratic hexes, discrete fastener springs) agrees on sag within 2% undamaged / notched / one plate and is 7% higher than the 3-D result with two plates (see repository).</li></ul>`;
