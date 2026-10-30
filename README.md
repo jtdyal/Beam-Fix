@@ -39,3 +39,23 @@ PowerShell on Windows:
 node tests/engine.test.js
 python -m http.server 8000 --directory docs
 ```
+
+## Validation against the 3-D reference model
+`python3 reference/reference_fea.py` builds a 3-D model (quadratic hexahedra, orthotropic wood, steel plates joined by discrete
+fastener springs) for the five cases in `reference/cases.json`; `node reference/compare.js` compares the browser engine to the stored
+`reference/results.json`. Memory note: the two-plate case needs about 6 GB at the default mesh, so `results.json` holds that case on a
+coarser mesh (HX=8", HY=4.5"; the one-plate case moved only 0.09% when coarsened the same way).
+
+| Case | 3-D model max sag | Browser engine | Difference |
+|---|---|---|---|
+| A undamaged | 0.659" | 0.658" | -0.2% |
+| B notch only | 0.895" | 0.879" | -1.8% |
+| C notch + 1 plate (3/16") | 0.407" | 0.407" | +0.1% |
+| D notch + 2 plates (3/16") | 0.261" | 0.279" | +6.8% (engine conservative) |
+
+Two calibrations were added after the first comparison (fitted to this default geometry only, so treat them as allowances):
+* the notch is treated as 1.5 x its depth longer at each end ("end-effect allowance", adjustable); the plain 1-D beam under-predicted
+  the notch's extra sag by about 5%;
+* peak fastener force carries a 1.5 x local-peaking allowance, because smeared springs gave peaks 20-30% below the 3-D discrete springs.
+
+Case E (fasteners made unphysically stiff) is only a sanity case for deflection; its fastener force is not comparable.

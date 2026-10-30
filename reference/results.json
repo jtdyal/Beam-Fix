@@ -1,0 +1,80 @@
+[
+ {
+  "name": "A_baseline",
+  "delta_mid": 0.6588189492181569,
+  "delta_max": 0.6588420784341932,
+  "x_at_max": 117.5,
+  "max_spring_force_x": null,
+  "max_spring_force_plate": null,
+  "Ey_over_E_used": 1.0,
+  "nodes_wood": 5445,
+  "dofs_total": 16335,
+  "elements": 480,
+  "runtime_s": 31.0
+ },
+ {
+  "name": "B_notch_only",
+  "delta_mid": 0.8787487702141569,
+  "delta_max": 0.894821978772975,
+  "x_at_max": 99.875,
+  "max_spring_force_x": null,
+  "max_spring_force_plate": null,
+  "Ey_over_E_used": 1.0,
+  "nodes_wood": 6535,
+  "dofs_total": 19605,
+  "elements": 586,
+  "runtime_s": 41.4
+ },
+ {
+  "name": "C_notch_1plate",
+  "delta_mid": 0.4053794474686083,
+  "delta_max": 0.4066209559901379,
+  "x_at_max": 111.5,
+  "max_spring_force_x": 165.40453137543545,
+  "max_spring_force_plate": "outside",
+  "max_spring_force_by_plate": {
+   "outside": 165.40453137543545
+  },
+  "n_springs": 56,
+  "Ey_over_E_used": 1.0,
+  "nodes_wood": 8135,
+  "dofs_total": 38562,
+  "elements": 1102,
+  "runtime_s": 118.5
+ },
+ {
+  "name": "D_notch_2plates",
+  "delta_mid": 0.2606874528599337,
+  "delta_max": 0.2608915545996341,
+  "x_at_max": 113.5,
+  "max_spring_force_x": 93.9184009192082,
+  "max_spring_force_plate": "outside",
+  "max_spring_force_by_plate": {
+   "outside": 93.9184009192082,
+   "inside": 93.91840002782747
+  },
+  "n_springs": 56,
+  "Ey_over_E_used": 1.0,
+  "nodes_wood": 3885,
+  "dofs_total": 24525,
+  "elements": 666,
+  "runtime_s": 89.2
+ },
+ {
+  "name": "E_notch_1plate_stiff",
+  "delta_mid": 0.4007746170697901,
+  "delta_max": 0.40186609572949755,
+  "x_at_max": 111.5,
+  "max_spring_force_x": 351.9876104196573,
+  "max_spring_force_plate": "outside",
+  "max_spring_force_by_plate": {
+   "outside": 351.9876104196573
+  },
+  "n_springs": 56,
+  "Ey_over_E_used": 1.0,
+  "nodes_wood": 8135,
+  "dofs_total": 38562,
+  "elements": 1102,
+  "runtime_s": 121.3
+ }
+]

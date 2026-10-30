@@ -174,13 +174,13 @@
       beam: { b: 3.5, d: 13.5, Ltot: 235, bearing: 3.5, E: 1.8e6, GoverE: 1 / 16, shear: true, Fb: 2400, Fv: 300, CD: 1.0 },
       load: { mode: 'limit', limit: 0.625, w_plf: 250 },
       target: 0.25,
-      notch: { enabled: true, length: 48, depth: 3, center: 70 },
+      notch: { enabled: true, length: 48, depth: 3, center: 70, ext: 1.5 },
       steel: { E: 29e6, G: 11.2e6, Fy: 36000 },
       plates: [
         { on: true, t: 0.1875, h: 13.5, yb: 0, len: 228, offset: 0 },
         { on: false, t: 0.1875, h: 13.5, yb: 0, len: 228, offset: 0 },
       ],
-      fast: { type: 'lag', size: '1/2', nail: '16d', rows: 2, pitch: 8, edge: 4, pen: 2.5, G: 0.55,
+      fast: { peak: 1.5, type: 'lag', size: '1/2', nail: '16d', rows: 2, pitch: 8, edge: 4, pen: 2.5, G: 0.55,
               CD: 1.0, CM: 1.0, Ct: 1.0, useCg: false, slipMult: 1.0 },
     };
   }
@@ -273,7 +273,8 @@
     const Es = P.steel.E;
     const ym = bm.d / 2;
     const xs1 = bm.bearing / 2, xs2 = bm.Ltot - bm.bearing / 2;
-    const nx0 = nt.center - nt.length / 2, nx1 = nt.center + nt.length / 2;
+    const extN = (nt.ext === undefined ? 1.5 : nt.ext) * nt.depth; // end-effect allowance (calibrated to the 3-D reference)
+    const nx0 = Math.max(0, nt.center - nt.length / 2 - extN), nx1 = Math.min(bm.Ltot, nt.center + nt.length / 2 + extN);
 
     // active plates
     const plates = [];
@@ -496,7 +497,7 @@
       let share = 0;
       repaired.el.forEach(e => { const pp = e.plate[i]; if (pp && Math.abs(e.Mtot) > 1000) share = Math.max(share, Math.abs(pp.M) / Math.abs(e.Mtot)); });
       const Fy = p.ys.length ? share * w * P.fast.pitch / p.ys.length : 0;
-      checks.fasteners.push({ plate: p.idx, cap, demand: p.Fmax, n: p.xsF.length, rows: p.ys.length, share, Fy });
+      checks.fasteners.push({ plate: p.idx, cap, demand: p.Fmax * (P.fast.peak || 1), n: p.xsF.length, rows: p.ys.length, share, Fy });
     });
     // double-shear bolts: both plates on the same bolts?
     if (P.fast.type === 'bolt' && nPl === 2) {
@@ -505,7 +506,7 @@
       if (same) {
         const sumMax = a.F.reduce((m, f, j) => Math.max(m, Math.abs(f) + Math.abs(b.F[j])), 0);
         const cap = fastenerCapacity(P, { plateT: Math.min(a.t, b.t), double: true, twoPlates: true });
-        checks.doubleShear = { cap, demand: sumMax, n: a.xsF.length };
+        checks.doubleShear = { cap, demand: sumMax * (P.fast.peak || 1), n: a.xsF.length };
       }
     }
     // group action
@@ -537,7 +538,8 @@
     const vEnd = 1.5 * Vcrit / (P.beam.b * P.beam.d);
     let vNotch = 0;
     if (P.notch.enabled) {
-      const nx0 = P.notch.center - P.notch.length / 2, nx1 = P.notch.center + P.notch.length / 2;
+      const en = (P.notch.ext === undefined ? 1.5 : P.notch.ext) * P.notch.depth;
+      const nx0 = P.notch.center - P.notch.length / 2 - en, nx1 = P.notch.center + P.notch.length / 2 + en;
       const Vn = Math.max(Math.abs(Vat(nx0)), Math.abs(Vat(nx1)));
       vNotch = 1.5 * Vn / (P.beam.b * (P.beam.d - P.notch.depth));
     }
