@@ -43,6 +43,17 @@ Connections (Chapter 11 and 12):
 Assumptions still to be confirmed: plate steel is A36 (Fe 87 ksi), lag screws are reduced-body, rows of fasteners are staggered/spaced so that screws from
 opposite faces do not meet, and CL = 1.0 (compression edge braced).
 
+### Twist check
+A single plate stiffens one face, so the beam twists slightly. The app estimates it from the plate's share of the bending moment times its offset
+from the load line, resisted by the beam's torsional stiffness with twist held at both bearings. `reference/twist_check.*` compares that with the 3-D model
+for the one-plate case: peak twist 0.454 deg (app model) vs 0.462 deg (3-D), profile along the beam within roughly 10-25%.
+Plates on both faces cancel the twist.
+
+### Notch = damage, filled with blocking
+The notch is treated as existing damage. The plate ignores it and is fastened into blocking that fills the notch: fastener rows run straight across,
+the blocking carries fastener load, and it adds no bending stiffness (the beam stays notched). The app always shows four cases side by side:
+original, notched, one plate, two plates.
+
 ## Develop
 ```
 node tests/engine.test.js

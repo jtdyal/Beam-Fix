@@ -2,39 +2,30 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Beam-Fix: glulam beam damage &amp; reinforcement-plate explorer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Beam-Fix</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <h1>Beam-Fix</h1>
-  <p class="sub">Notched glulam header &rarr; steel side-plate reinforcement. Change any input; results update live.</p>
-  <div class="hdr-actions">
-    <button id="btnTheme" title="Switch between light and dark">Dark mode</button>
-    <button id="btnLink" title="Copy a link that reproduces the current inputs">Copy share link</button>
-    <button id="btnReset" title="Back to the default case">Reset</button>
+<header class="top">
+  <div class="brand"><h1>Beam-Fix</h1><span>Damaged glulam beam: plate repair</span></div>
+  <div class="tools">
+    <button id="btnTheme" aria-label="Switch between light and dark">Dark</button>
+    <button id="btnLink" aria-label="Copy a link to this exact setup">Share</button>
+    <button id="btnReset" aria-label="Reset all inputs">Reset</button>
   </div>
 </header>
-
-<div class="disclaimer">
-  <strong>Exploration tool, not an engineered design.</strong> This is a simplified beam finite-element model with NDS-style
-  fastener capacities. A tension-face notch in a structural glulam is a serious defect; any real repair of a load-bearing member must
-  be reviewed and stamped by a licensed structural engineer.
-</div>
-
+<div id="sumbar" class="sumbar" aria-live="polite"></div>
 <main>
-  <aside id="inputs"></aside>
-  <section id="results">
-    <div id="cards" class="cards"></div>
-    <div id="warnings"></div>
-    <div class="panel"><h2>Beam elevation</h2><div id="elev"></div></div>
-    <div class="panel"><h2>Deflection along the span</h2><div id="defl"></div></div>
-    <div class="panel"><h2>Fastener check</h2><div id="fast"></div><div id="fastChart"></div></div>
-    <div class="panel"><h2>Plate thickness sweep (other inputs held)</h2><div id="sweep"></div></div>
-    <div class="panel"><h2>Wood checks</h2><div id="wood"></div></div>
-    <div class="panel notes"><h2>Model &amp; assumptions</h2><div id="notes"></div></div>
+  <section id="visuals">
+    <div id="notes"></div>
+    <div class="panel"><div class="ph"><h2>Beam</h2><div id="segCheck" class="seg"></div></div><div id="elev"></div></div>
+    <div class="panel"><h2>Sag along the span</h2><div id="defl"></div></div>
+    <div class="panel"><div class="ph"><h2>Stress map</h2><div id="segStress" class="seg"></div></div><div id="stress"></div></div>
+    <div class="panel"><h2>Twist</h2><div id="twist"></div></div>
   </section>
+  <section id="controls"></section>
+  <section id="details"></section>
 </main>
 <footer>Source &amp; validation: <a href="https://github.com/jtdyal/Beam-Fix">github.com/jtdyal/Beam-Fix</a></footer>
 <script src="engine.js"></script>

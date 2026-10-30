@@ -194,7 +194,7 @@
     return {
       beam: { b: 3.5, d: 13.5, Ltot: 235, bearing: 3.5, E: 1.8e6, shearFree: 1.05, GoverE: 1 / 16, shear: true, Fb: 2400, Fv: 300, CD: 1.0 },
       load: { mode: 'limit', limit: 0.625, w_plf: 250 },
-      target: 0.25,
+      target: 0.25, check: 1, plate2same: true,
       notch: { enabled: true, length: 48, depth: 3, center: 70, ext: 1.5 },
       steel: { E: 29e6, G: 11.2e6, Fy: 36000 },
       plates: [
@@ -228,7 +228,6 @@
     const ey = Math.max(1.5 * D, 1.0);
     const g = plateClampedGeom(P, pl);
     let lo = g.yb + ey, hi = g.yb + g.h - ey;
-    if (P.notch.enabled) lo = Math.max(lo, P.notch.depth + ey);
     hi = Math.min(hi, P.beam.d - ey);
     const n = Math.max(1, Math.round(P.fast.rows));
     if (hi < lo) return [];
@@ -447,7 +446,7 @@
       const u = li => (sol[(e + 1) * ND + 2 + li] - sol[e * ND + 2 + li]) / le;
       const eps0 = u(0);
       const r = {};
-      r.xm = E_.xm; r.curv = ph;
+      r.xm = E_.xm; r.curv = ph; r.eps0 = eps0;
       // wood
       const sb = E * (eps0 - (E_.yn - ym) * ph), st = E * (eps0 - (bm.d - ym) * ph);
       r.woodBot = sb; r.woodTop = st; r.woodN = E * (E_.Aw * eps0 - E_.Bw * ph);
@@ -462,7 +461,7 @@
         const A = p.t * p.h, Ip = p.t * Math.pow(p.h, 3) / 12;
         const N_ = Es * A * ep, M_ = Es * Ip * ph;
         const sBot = Es * (ep - (p.yb - p.yc) * ph), sTop = Es * (ep - (p.yb + p.h - p.yc) * ph);
-        r.plate.push({ N: N_, M: M_, sBot, sTop });
+        r.plate.push({ N: N_, M: M_, sBot, sTop, eps0: ep, Marm: M_ - (p.yc - ym) * N_ });
         Mtot += M_ - (p.yc - ym) * N_;
       });
       r.Mtot = Mtot;
@@ -496,8 +495,48 @@
   /* ------------------------------------------------------------------ */
   /* Full analysis                                                        */
   /* ------------------------------------------------------------------ */
-  function analyze(P) {
+  /* Torsion from a one-sided plate (first-order).  Each layer carries a share of the vertical shear equal to its share of the
+     bending moment; the plate's share acts at the plate offset from the load line (wood centreline), giving a distributed
+     torque m = w * z_sc.  Wood + plate torsional stiffness resist it with twist restrained at both bearings. */
+  function twistOf(P, res, w) {
+    const bm = P.beam, ne = res.ne, nn = res.nn, X = res.X;
+    const G = Ebend(P) * bm.GoverE, Gs = P.steel.G;
+    const J = (a, c) => { const bb = Math.min(a, c), dd = Math.max(a, c); return dd * Math.pow(bb, 3) / 3 * (1 - 0.63 * bb / dd * (1 - Math.pow(bb, 4) / (12 * Math.pow(dd, 4)))); };
+    const k = new Float64Array(ne), m = new Float64Array(ne), zs = new Float64Array(ne);
+    for (let e = 0; e < ne; e++) {
+      const el = res.el[e], le = X[e + 1] - X[e];
+      let GJ = G * J(bm.b, bm.d - el.yn), zsc = 0;
+      res.plates.forEach((p, i) => {
+        const pp = el.plate[i]; if (!pp) return;
+        GJ += Gs * J(p.t, p.h);
+        const z = (p.idx === 0 ? -1 : 1) * (bm.b / 2 + p.t / 2);   // outside plate at -z, inside plate at +z
+        if (Math.abs(el.Mtot) > 1) zsc += (pp.Marm / el.Mtot) * z;
+      });
+      zs[e] = zsc; k[e] = GJ / le;
+      m[e] = (el.xm > res.xs1 && el.xm < res.xs2) ? -w * zsc * le / 2 : 0;   // nodal torque contribution (each end)
+    }
+    const a = new Float64Array(nn), d = new Float64Array(nn), c = new Float64Array(nn), r = new Float64Array(nn);
+    for (let e = 0; e < ne; e++) {
+      d[e] += k[e]; d[e + 1] += k[e]; c[e] -= k[e]; a[e + 1] -= k[e]; r[e] += m[e]; r[e + 1] += m[e];
+    }
+    const fix = x => { let bi = 0, bd = Infinity; for (let i = 0; i < nn; i++) { const q = Math.abs(X[i] - x); if (q < bd) { bd = q; bi = i; } } return bi; };
+    [fix(res.xs1), fix(res.xs2)].forEach(i => { a[i] = 0; c[i] = 0; d[i] = 1; r[i] = 0; if (i > 0) c[i - 1] = 0; if (i < nn - 1) a[i + 1] = 0; });
+    // Thomas algorithm
+    for (let i = 1; i < nn; i++) { const f = a[i] / d[i - 1]; d[i] -= f * c[i - 1]; r[i] -= f * r[i - 1]; }
+    const th = new Float64Array(nn);
+    th[nn - 1] = r[nn - 1] / d[nn - 1];
+    for (let i = nn - 2; i >= 0; i--) th[i] = (r[i] - c[i] * th[i + 1]) / d[i];
+    let mx = 0, xm = 0; for (let i = 0; i < nn; i++) if (Math.abs(th[i]) > Math.abs(mx)) { mx = th[i]; xm = X[i]; }
+    const zscMax = zs.reduce((q, v) => Math.abs(v) > Math.abs(q) ? v : q, 0);
+    return { theta: th, X, max: mx, xMax: xm, deg: mx * 180 / Math.PI, zsc: zscMax,
+             lateralTop: Math.abs(mx) * bm.d / 2 };
+  }
+
+  function analyze(P0) {
+    const P = clone(P0);
+    if (P.plate2same !== false) { const a = P.plates[0]; Object.assign(P.plates[1], { t: a.t, h: a.h, yb: a.yb, len: a.len, offset: a.offset }); }
     const warn = [];
+    const W = (t, d) => warn.push({ t, d });
     // unit-load baseline (no notch, no plates)
     const u = solve(P, 1, { notch: false, plates: [false, false] });
     const dUnit = u.maxSag;
@@ -505,16 +544,18 @@
     if (P.load.mode === 'limit') w = P.load.limit / dUnit; else w = P.load.w_plf / 12;
     const baseline = solve(P, w, { notch: false, plates: [false, false] });
     const damaged = solve(P, w, { notch: P.notch.enabled, plates: [false, false] });
-    const repaired = solve(P, w, {});
+    const single = solve(P, w, { plates: [true, false] });
+    const dbl = solve(P, w, { plates: [true, true] });
+    const check = P.check === 2 ? 2 : 1;
+    const repaired = check === 2 ? dbl : single;
+    const scen = [baseline, damaged, single, dbl];
+    const twist = scen.map(r => twistOf(P, r, w));
 
-    // plate thickness sweep
+    // plate thickness sweep (one plate and two plates)
     const sweep = [];
-    const ts = [2, 3, 4, 5, 6, 7, 8].map(n => n / 16);
-    ts.forEach(t => {
-      const Q = clone(P); Q.plates[0].t = t; if (Q.plates[1].on) Q.plates[1].t = t;
-      const cfg = {};
-      const r = solve(Q, w, cfg);
-      sweep.push({ t, sag: r.maxSag });
+    [2, 3, 4, 5, 6, 7, 8].map(n => n / 16).forEach(t => {
+      const Q = clone(P); Q.plates[0].t = t; Q.plates[1].t = t;
+      sweep.push({ t, sag: solve(Q, w, { plates: [true, false] }).maxSag, sag2: solve(Q, w, { plates: [true, true] }).maxSag });
     });
 
     // fastener checks
@@ -561,7 +602,7 @@
       });
       return { tens, comp, tensX };
     };
-    const sB = stress(baseline), sD = stress(damaged), sR = stress(repaired);
+    const sB = stress(baseline), sD = stress(damaged), sS = stress(single), sT = stress(dbl), sR = stress(repaired);
     // ---- wood checks (NDS 2015 3.4.3, 5.3.6, 5.3.10, 5.4.5)
     const bm = P.beam, CDw = bm.CD || 1, Cvr = 0.72;
     const Vat = x => repaired.R - w * (x - repaired.xs1);
@@ -594,40 +635,38 @@
       }
     }
 
-    // warnings
+    // warnings: short title (t) + detail (d), shown collapsed in the UI
     const D = fastenerD(P.fast);
-    if (shearConn && shearConn.V > shearConn.Vr) warn.push('NDS 3.4.3.3: bolts/lag screws within 5d (' + (5 * bm.d).toFixed(1) + '") of the beam end cut the allowable shear to ' + shearConn.Vr.toFixed(0) + ' lb against ' + shearConn.V.toFixed(0) + ' lb at the support face. Start the fasteners at least 5d from the end (raise "Plate end to first fastener"), or have the end shear checked by an engineer.');
+    if (shearConn && shearConn.V > shearConn.Vr) W('End shear at the connection is too high', 'NDS 3.4.3.3: bolts or lag screws within 5d (' + (5 * bm.d).toFixed(1) + '") of the beam end cut the allowable shear to ' + shearConn.Vr.toFixed(0) + ' lb, against ' + shearConn.V.toFixed(0) + ' lb at the support face. Start the fasteners at least 5d from the end (raise "Plate end to first fastener"), or have the end shear checked by an engineer.');
     if (P.notch.enabled) {
-      warn.push('NDS 5.4.5.1: the tension side of a glued laminated bending member shall not be notched except at member ends for bearing, and then only to the lesser of 1/10 of the depth or 3". This notch is outside what the code permits, so the repair is a deviation that needs engineering judgement.');
-      if (P.notch.depth > 3 || P.notch.depth > bm.d / 10) warn.push('Notch depth ' + P.notch.depth + '" exceeds the NDS 5.4.5.1 limit even for end notches (lesser of d/10 = ' + (bm.d / 10).toFixed(2) + '" or 3").');
-      warn.push('Stress concentration at the notch corners and crack growth are not captured by the beam model (NDS 3.2.3.1: a square-cornered notch concentrates stress).');
+      W('The notch is damage the code does not allow', 'NDS 5.4.5.1 does not permit notching the tension side of a glulam bending member except at the ends for bearing, and then only to the lesser of 1/10 of the depth or 3". This notch is existing damage, so the repair is outside the code and needs an engineer\'s judgement. Stress concentration at the notch corners and crack growth (NDS 3.2.3.1) are not captured by the beam model.');
+      W('Blocking in the notch', 'The plate ignores the notch and is fastened into blocking that fills it. The model lets those fasteners carry load as if in sound wood but gives the blocking no bending stiffness, so the beam stays notched. The blocking must be firmly attached to the beam for this to hold.');
     }
     if (P.fast.type !== 'nail') {
-      if (P.fast.pitch < 4 * D) warn.push('Spacing in a row (' + P.fast.pitch + '") is under 4D = ' + (4 * D).toFixed(2) + '": geometry factor CΔ = pitch/4D applies (Table 12.5.1B); under 3D is not permitted.');
+      if (P.fast.pitch < 4 * D) W('Fastener spacing is tight', 'Spacing in a row (' + P.fast.pitch + '") is under 4D = ' + (4 * D).toFixed(2) + '": geometry factor CΔ = pitch/4D applies (Table 12.5.1B); under 3D is not permitted.');
       const ysP = active.length ? active[0].ys : [];
-      if (ysP.length > 1) {
-        if (ysP[1] - ysP[0] < 1.5 * D) warn.push('Row spacing is less than 1.5D = ' + (1.5 * D).toFixed(2) + '" (Table 12.5.1D).');
-      }
+      if (ysP.length > 1 && ysP[1] - ysP[0] < 1.5 * D) W('Rows are too close', 'Row spacing is less than 1.5D = ' + (1.5 * D).toFixed(2) + '" (Table 12.5.1D).');
       const capSpread = P.fast.type === 'lag' ? 6 : 10;
-      warn.push('Table 12.5.1F limits the perpendicular-to-grain distance between the outermost ' + (P.fast.type === 'lag' ? 'lag screws' : 'bolts') + ' in glulam to ' + capSpread + '" (rows are kept within it).');
-      warn.push('Bolt/lag hole clearance (initial slip before bearing) is not modelled; real stiffness gain will be lower if holes are oversized (NDS 12.1.3.2: 1/32" to 1/16").');
+      W('Row spread limit', 'Table 12.5.1F limits the distance across the grain between the outermost ' + (P.fast.type === 'lag' ? 'lag screws' : 'bolts') + ' in glulam to ' + capSpread + '". Rows are placed within it.');
+      W('Hole clearance not modelled', 'Initial slip before bearing (holes are 1/32" to 1/16" oversize, NDS 12.1.3.2) is not modelled; the real stiffness gain will be lower if the holes are loose.');
     } else {
-      warn.push('Nails through steel plate need pre-punched/pre-drilled holes; nail spacing, end and edge distances for D < 1/4" must prevent splitting (NDS 12.1.1, 12.5.1.1). Reference Z for nails assumes ASTM A653 Grade 33 plate up to 1/4" gauge-type thicknesses; this tool uses A36 bearing (87,000 psi).');
+      W('Nailing through steel', 'Nails through steel plate need pre-punched or pre-drilled holes, and spacing, end and edge distances for D < 1/4" must prevent splitting (NDS 12.1.1, 12.5.1.1). Reference Z for nails assumes A653 Grade 33 plate in gauge thicknesses; this tool uses A36 bearing (87,000 psi).');
     }
-    if (P.fast.type === 'nail' && active.some(p => p.t > 0.25)) warn.push('Nailing through plate thicker than 1/4" is generally impractical.');
-    active.forEach(p => { if (!p.ys.length) warn.push('Plate ' + (p.idx + 1) + ': no room for fastener rows between the plate edges, notch top and beam edges.'); });
-    if (P.fast.type !== 'bolt' && nPl === 2) warn.push('Two plates with lag screws/nails: stagger the fasteners from the two faces so screws from opposite sides do not meet inside the 3.5" beam.');
-    checks.fasteners.forEach(f => f.cap.notes.forEach(n => { if (warn.indexOf(n) < 0) warn.push(n); }));
+    if (P.fast.type === 'nail' && active.some(p => p.t > 0.25)) W('Nails through thick plate', 'Nailing through plate thicker than 1/4" is generally impractical.');
+    active.forEach(p => { if (!p.ys.length) W('No room for fasteners', 'Plate ' + (p.idx + 1) + ': no room for fastener rows between the plate edges and the beam edges.'); });
+    if (P.fast.type !== 'bolt' && nPl === 2) W('Stagger the fasteners', 'With two plates and lag screws or nails, stagger the fasteners from the two faces so screws from opposite sides do not meet inside the 3.5" beam.');
+    checks.fasteners.forEach(f => f.cap.notes.forEach(n => { if (!warn.some(x => x.d === n)) W('Fastener not permitted', n); }));
+    const twistNote = Math.abs(twist[2].deg) > 0.001 ? 'A single plate stiffens one side, so the beam twists slightly. Estimated peak twist ' + Math.abs(twist[2].deg).toFixed(2) + '° with the ends held; plates on both faces cancel it.' : null;
 
     return {
-      P, w, wPlf: w * 12, dUnit, baseline, damaged, repaired, sweep, checks, warn,
-      wood: { base: sB, dam: sD, rep: sR, vEnd, Fv, FvR, Cv, FbAdj, shearNotch, shearConn },
+      P, w, wPlf: w * 12, dUnit, baseline, damaged, single, double: dbl, scen, twist, check, repaired, sweep, checks, warn, twistNote,
+      wood: { base: sB, dam: sD, single: sS, double: sT, rep: sR, vEnd, Fv, FvR, Cv, FbAdj, shearNotch, shearConn },
     };
   }
 
   return {
     defaults, clone, solve, analyze, NAILS, LAGS, BOLTS,
     fastenerD, fastenerFyb, fastenerCapacity, slipModulus, groupCg, zSingle, zDouble, minMode,
-    plateRange, plateClampedGeom, rowsY, fastenerXs, FES_STEEL, FeWood, fastenerDy, Ebend,
+    plateRange, plateClampedGeom, rowsY, fastenerXs, FES_STEEL, FeWood, fastenerDy, Ebend, twistOf,
   };
 });
