@@ -147,18 +147,18 @@
     let s = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Beam elevation">`;
     // load arrows
     const xs1 = P.beam.bearing / 2, xs2 = P.beam.Ltot - P.beam.bearing / 2;
-    for (let x = xs1; x <= xs2 + 0.01; x += (xs2 - xs1) / 30) s += `<line x1="${X(x)}" y1="${y0 - 16}" x2="${X(x)}" y2="${y0 - 3}" stroke="#667085" stroke-width="1"/>`;
+    for (let x = xs1; x <= xs2 + 0.01; x += (xs2 - xs1) / 30) s += `<line x1="${X(x)}" y1="${y0 - 16}" x2="${X(x)}" y2="${y0 - 3}" stroke="var(--mute)" stroke-width="1"/>`;
     s += `<text x="${X(xs2)}" y="${y0 - 20}" text-anchor="end">w = ${A.wPlf.toFixed(0)} lb/ft over the span</text>`;
     s += `<rect x="${X(0)}" y="${Y(P.beam.d)}" width="${P.beam.Ltot * sx}" height="${P.beam.d * sy}" fill="var(--wood)" stroke="#8b6a3a"/>`;
     if (P.notch.enabled) {
       const nx0 = P.notch.center - P.notch.length / 2;
-      s += `<rect x="${X(nx0)}" y="${Y(P.notch.depth)}" width="${P.notch.length * sx}" height="${P.notch.depth * sy}" fill="#fff" stroke="#c0392b" stroke-dasharray="4 3"/>`;
-      s += `<text x="${X(nx0)}" y="${Y(0) + 13}" fill="#c0392b">notch ${P.notch.length}" x ${P.notch.depth}" (centre ${P.notch.center}" from left end)</text>`;
+      s += `<rect x="${X(nx0)}" y="${Y(P.notch.depth)}" width="${P.notch.length * sx}" height="${P.notch.depth * sy}" fill="var(--card)" stroke="var(--dam)" stroke-dasharray="4 3"/>`;
+      s += `<text x="${X(nx0)}" y="${Y(0) + 13}" fill="var(--dam)">notch ${P.notch.length}" x ${P.notch.depth}" (centre ${P.notch.center}" from left end)</text>`;
     }
     A.repaired.plates.forEach((p, i) => {
       const inside = p.idx === 1;
-      s += `<rect x="${X(p.px0)}" y="${Y(p.yb + p.h)}" width="${(p.px1 - p.px0) * sx}" height="${p.h * sy}" fill="${inside ? 'none' : 'var(--steel)'}" fill-opacity="0.45" stroke="#44546a" stroke-width="1.4" ${inside ? 'stroke-dasharray="6 3"' : ''}/>`;
-      p.xsF.forEach(x => p.ys.forEach(y => { s += `<circle cx="${X(x)}" cy="${Y(y)}" r="1.6" fill="#1d2430"/>`; }));
+      s += `<rect x="${X(p.px0)}" y="${Y(p.yb + p.h)}" width="${(p.px1 - p.px0) * sx}" height="${p.h * sy}" fill="${inside ? 'none' : 'var(--steel)'}" fill-opacity="0.45" stroke="var(--platestroke)" stroke-width="1.4" ${inside ? 'stroke-dasharray="6 3"' : ''}/>`;
+      p.xsF.forEach(x => p.ys.forEach(y => { s += `<circle cx="${X(x)}" cy="${Y(y)}" r="1.6" fill="var(--ink)"/>`; }));
       s += `<text x="${X(p.px0) + 2}" y="${Y(p.yb + p.h) - 3}">${inside ? 'inside' : 'outside'} plate ${fr16(p.t)} x ${p.h}" x ${(p.px1 - p.px0).toFixed(0)}"  (bottom at ${p.yb}")</text>`;
     });
     // supports
@@ -177,13 +177,13 @@
     const X = x => ml + x / P.beam.Ltot * (W - ml - mr), Y = v => mt + v / ymax * (Hh - mt - mb);
     let s = `<svg viewBox="0 0 ${W} ${Hh}" width="100%">`;
     const step = ymax > 1.2 ? 0.25 : 0.125;
-    for (let v = 0; v <= ymax; v += step) { s += `<line x1="${ml}" x2="${W - mr}" y1="${Y(v)}" y2="${Y(v)}" stroke="#eceff3"/><text x="${ml - 6}" y="${Y(v) + 4}" text-anchor="end">${v.toFixed(3)}</text>`; }
+    for (let v = 0; v <= ymax; v += step) { s += `<line x1="${ml}" x2="${W - mr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)"/><text x="${ml - 6}" y="${Y(v) + 4}" text-anchor="end">${v.toFixed(3)}</text>`; }
     for (let x = 0; x <= P.beam.Ltot; x += 40) s += `<text x="${X(x)}" y="${Hh - 16}" text-anchor="middle">${x}</text>`;
     s += `<text x="${(ml + W - mr) / 2}" y="${Hh - 2}" text-anchor="middle">distance from left end of beam (in)  |  sag downward (in)</text>`;
     const line = (res, col, dash) => { let d = ''; for (let k = 0; k < res.nn; k++) d += (k ? 'L' : 'M') + X(res.X[k]).toFixed(1) + ' ' + Y(res.defl[k]).toFixed(1); return `<path d="${d}" fill="none" stroke="${col}" stroke-width="2.4" ${dash ? 'stroke-dasharray="' + dash + '"' : ''}/>`; };
     s += line(A.baseline, 'var(--base)') + line(A.damaged, 'var(--dam)') + line(A.repaired, 'var(--rep)');
     s += `<line x1="${ml}" x2="${W - mr}" y1="${Y(lim)}" y2="${Y(lim)}" stroke="var(--base)" stroke-dasharray="3 4"/><text x="${W - mr - 4}" y="${Y(lim) - 4}" text-anchor="end">original limit ${fr16(lim)}</text>`;
-    s += `<line x1="${ml}" x2="${W - mr}" y1="${Y(P.target)}" y2="${Y(P.target)}" stroke="#7a3db8" stroke-dasharray="3 4"/><text x="${W - mr - 4}" y="${Y(P.target) - 4}" text-anchor="end" fill="#7a3db8">repair goal ${fr16(P.target)}</text>`;
+    s += `<line x1="${ml}" x2="${W - mr}" y1="${Y(P.target)}" y2="${Y(P.target)}" stroke="var(--c3)" stroke-dasharray="3 4"/><text x="${W - mr - 4}" y="${Y(P.target) - 4}" text-anchor="end" fill="var(--c3)">repair goal ${fr16(P.target)}</text>`;
     s += `</svg><div class="legend"><span><i style="background:var(--base)"></i>Undamaged</span><span><i style="background:var(--dam)"></i>Notched</span><span><i style="background:var(--rep)"></i>Notched + plate(s)</span></div>`;
     $('defl').innerHTML = s;
   }
@@ -223,21 +223,21 @@
     const X = x => ml + x / P.beam.Ltot * (W - ml - mr), Y = v => mt + (1 - v / ymax) * (Hh - mt - mb);
     let s = `<svg viewBox="0 0 ${W} ${Hh}" width="100%">`;
     const st = Math.pow(10, Math.floor(Math.log10(ymax))) / (ymax / Math.pow(10, Math.floor(Math.log10(ymax))) > 5 ? 1 : 2);
-    for (let v = 0; v <= ymax; v += st) s += `<line x1="${ml}" x2="${W - mr}" y1="${Y(v)}" y2="${Y(v)}" stroke="#eceff3"/><text x="${ml - 6}" y="${Y(v) + 4}" text-anchor="end">${v.toFixed(0)}</text>`;
+    for (let v = 0; v <= ymax; v += st) s += `<line x1="${ml}" x2="${W - mr}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)"/><text x="${ml - 6}" y="${Y(v) + 4}" text-anchor="end">${v.toFixed(0)}</text>`;
     for (let x = 0; x <= P.beam.Ltot; x += 40) s += `<text x="${X(x)}" y="${Hh - 14}" text-anchor="middle">${x}</text>`;
     s += `<text x="${(ml + W - mr) / 2}" y="${Hh - 1}" text-anchor="middle">position along beam (in)  |  force per fastener (lb)</text>`;
-    const cols = ['#1f5fbf', '#a35a00'];
+    const cols = ['var(--c1)', 'var(--c2)'];
     A.repaired.plates.forEach((p, i) => {
       s += p.xsF.map((x, j) => `<line x1="${X(x)}" x2="${X(x)}" y1="${Y(0)}" y2="${Y(Math.abs(p.F[j]))}" stroke="${cols[i]}" stroke-width="3" stroke-opacity="0.8"/>`).join('');
       s += `<line x1="${ml}" x2="${W - mr}" y1="${Y(c.fasteners[i].cap.Zadj)}" y2="${Y(c.fasteners[i].cap.Zadj)}" stroke="${cols[i]}" stroke-dasharray="4 3"/>`;
     });
-    s += `</svg><div class="legend"><span><i style="background:#1f5fbf"></i>Plate ${A.repaired.plates[0].idx + 1} fastener force</span>${A.repaired.plates[1] ? '<span><i style="background:#a35a00"></i>Plate 2 fastener force</span>' : ''}<span>dashed = adjusted capacity Z′</span></div>`;
+    s += `</svg><div class="legend"><span><i style="background:var(--c1)"></i>Plate ${A.repaired.plates[0].idx + 1} fastener force</span>${A.repaired.plates[1] ? '<span><i style="background:var(--c2)"></i>Plate 2 fastener force</span>' : ''}<span>dashed = adjusted capacity Z′</span></div>`;
     $('fastChart').innerHTML = s;
   }
 
   function renderSweep(A) {
     let h = '<table><tr><th>Plate thickness (each)</th>' + A.sweep.map(s => `<th>${fr16(s.t)}</th>`).join('') + '</tr><tr><td>Max sag</td>';
-    h += A.sweep.map(s => `<td ${Math.abs(s.t - P.plates[0].t) < 1e-6 ? 'style="background:#eef4ff;font-weight:700"' : ''}>${fin(s.sag)}</td>`).join('') + '</tr><tr><td>Meets goal ' + fr16(P.target) + '</td>';
+    h += A.sweep.map(s => `<td ${Math.abs(s.t - P.plates[0].t) < 1e-6 ? 'style="background:var(--hl);font-weight:700"' : ''}>${fin(s.sag)}</td>`).join('') + '</tr><tr><td>Meets goal ' + fr16(P.target) + '</td>';
     h += A.sweep.map(s => `<td>${pill(s.sag <= P.target + 1e-9, 'yes', 'no')}</td>`).join('') + '</tr></table>';
     $('sweep').innerHTML = h;
   }
@@ -296,6 +296,18 @@
     history.replaceState(null, '', toHash());
   }
 
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    $('btnTheme').textContent = t === 'dark' ? 'Light mode' : 'Dark mode';
+  }
+  let theme = null;
+  try { theme = localStorage.getItem('bf-theme'); } catch (e) { /* storage may be unavailable */ }
+  if (theme !== 'dark' && theme !== 'light') theme = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  applyTheme(theme);
+  $('btnTheme').addEventListener('click', () => {
+    theme = theme === 'dark' ? 'light' : 'dark'; applyTheme(theme);
+    try { localStorage.setItem('bf-theme', theme); } catch (e) { /* ignore */ }
+  });
   $('btnReset').addEventListener('click', () => { P = BF.defaults(); renderInputs(); update(); });
   $('btnLink').addEventListener('click', () => {
     const url = location.href.split('#')[0] + toHash();
